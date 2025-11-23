@@ -20,7 +20,7 @@ wheels/
 /CLAUDE.md
 
 # Development-only configuration (not for public distribution)
-.claude/
+# .claude/
 .vscode/
 
 # Development-only documentation (incomplete/work-in-progress)
