@@ -11,9 +11,28 @@ wheels/
 .env
 .python-version
 
+# Type checking cache
+.mypy_cache/
+.ruff_cache/
+
 # Claude Code settings
 .claude-code/
 /CLAUDE.md
+
+# Development-only configuration (not for public distribution)
+# .claude/
+.vscode/
+
+# Development-only documentation (incomplete/work-in-progress)
+GEMINI.md
+
+# Agent-generated output (development artifacts)
+chief_of_staff_agent/plans/
+chief_of_staff_agent/audit/
+chief_of_staff_agent/output_reports/
+**/plans/
+**/audit/
+**/output_reports/
 
 # Package manager lock files (optional for tutorials)
 uv.lock
@@ -24,3 +43,9 @@ uv.lock
 
 # macOS
 .DS_Store
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~

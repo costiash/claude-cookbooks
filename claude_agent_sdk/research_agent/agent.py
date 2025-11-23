@@ -65,6 +65,7 @@ async def send_query(
         allowed_tools=["WebSearch", "Read"],
         continue_conversation=continue_conversation,
         system_prompt="You are a research agent specialized in AI",
+        max_buffer_size=10 * 1024 * 1024,  # 10MB buffer for handling images and large responses
     )
 
     result = None
