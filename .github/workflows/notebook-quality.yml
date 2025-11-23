@@ -37,13 +37,49 @@ jobs:
       
       - name: Lint notebooks with Ruff
         run: |
-          uv run ruff check **/*.ipynb --show-fixes || true
-          uv run ruff format **/*.ipynb --check || true
+          # Get list of changed notebooks
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED_NOTEBOOKS=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }} ${{ github.sha }} | grep '\.ipynb$' || true)
+          else
+            CHANGED_NOTEBOOKS=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '\.ipynb$' || true)
+          fi
+
+          if [ -z "$CHANGED_NOTEBOOKS" ]; then
+            echo "ℹ️  No notebooks changed, skipping linting"
+            exit 0
+          fi
+
+          echo "📋 Linting changed notebooks:"
+          echo "$CHANGED_NOTEBOOKS"
+          echo ""
+
+          # Lint only changed notebooks
+          echo "$CHANGED_NOTEBOOKS" | xargs uv run ruff check --show-fixes || true
+          echo "$CHANGED_NOTEBOOKS" | xargs uv run ruff format --check || true
       
       - name: Validate notebook structure
         id: validate
         run: |
-          uv run python scripts/validate_notebooks.py | tee validation_output.txt
+          # Get list of changed notebooks
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            CHANGED_NOTEBOOKS=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }} ${{ github.sha }} | grep '\.ipynb$' || true)
+          else
+            CHANGED_NOTEBOOKS=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '\.ipynb$' || true)
+          fi
+
+          if [ -z "$CHANGED_NOTEBOOKS" ]; then
+            echo "ℹ️  No notebooks changed, skipping validation"
+            echo "has_issues=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "📋 Validating changed notebooks:"
+          echo "$CHANGED_NOTEBOOKS"
+          echo ""
+
+          # Validate only changed notebooks
+          echo "$CHANGED_NOTEBOOKS" | xargs uv run python scripts/validate_notebooks.py | tee validation_output.txt
+
           # Check if validation found issues
           if grep -q "❌" validation_output.txt; then
             echo "has_issues=true" >> $GITHUB_OUTPUT
@@ -84,24 +120,46 @@ jobs:
       # Only run API tests on main branch or for maintainers (costs money)
       - name: Execute notebooks (API Testing)
         if: |
-          github.event_name == 'push' || 
+          github.event_name == 'push' ||
           github.event.pull_request.author_association == 'MEMBER' ||
           github.event.pull_request.author_association == 'OWNER'
         env:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           mkdir -p test_outputs
-          for notebook in $(find . -name "*.ipynb" -not -path "*/.*" -not -path "*/test_outputs/*"); do
-            echo "📓 Testing: $notebook"
-            output_name=$(echo "$notebook" | sed 's|/|_|g' | sed 's|\.|_|g')
-            # Use nbconvert to execute notebooks and save outputs
-            uv run jupyter nbconvert --to notebook \
-              --execute "$notebook" \
-              --ExecutePreprocessor.kernel_name=python3 \
-              --ExecutePreprocessor.timeout=120 \
-              --output "test_outputs/${output_name}_executed.ipynb" \
-              --output-dir=. \
-              || echo "⚠️  Failed: $notebook"
+
+          # Get list of changed notebooks
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # For PRs, compare against base branch
+            CHANGED_NOTEBOOKS=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep '\.ipynb$' || true)
+          else
+            # For push to main, compare with previous commit
+            CHANGED_NOTEBOOKS=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep '\.ipynb$' || true)
+          fi
+
+          if [ -z "$CHANGED_NOTEBOOKS" ]; then
+            echo "ℹ️  No notebooks changed, skipping execution tests"
+            exit 0
+          fi
+
+          echo "📋 Changed notebooks:"
+          echo "$CHANGED_NOTEBOOKS"
+          echo ""
+
+          # Execute only changed notebooks
+          echo "$CHANGED_NOTEBOOKS" | while read notebook; do
+            if [ -f "$notebook" ]; then
+              echo "📓 Testing: $notebook"
+              output_name=$(echo "$notebook" | sed 's|/|_|g' | sed 's|\.|_|g')
+              # Use nbconvert to execute notebooks and save outputs
+              uv run jupyter nbconvert --to notebook \
+                --execute "$notebook" \
+                --ExecutePreprocessor.kernel_name=python3 \
+                --ExecutePreprocessor.timeout=120 \
+                --output "test_outputs/${output_name}_executed.ipynb" \
+                --output-dir=. \
+                || echo "⚠️  Failed: $notebook"
+            fi
           done
       
       # Mock testing for external contributors
