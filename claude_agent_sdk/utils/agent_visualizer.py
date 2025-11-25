@@ -1,7 +1,7 @@
 import base64
 import html
 import pprint
-from typing import Any, Optional
+from typing import Any
 
 # Initialize optional dependencies as Any to satisfy linters/mypy
 HTML: Any = None
@@ -27,17 +27,26 @@ except ImportError:
     HTML = _HTML
 
 
+# Box-drawing configuration constants
+BOX_WIDTH = 58  # Width for main conversation boxes
+SUBAGENT_WIDTH = 54  # Width for subagent delegation blocks (slightly narrower for visual hierarchy)
+
 # Box-drawing characters for clean visual formatting
-BOX_TOP = "╭" + "─" * 58 + "╮"
-BOX_BOTTOM = "╰" + "─" * 58 + "╯"
-BOX_DIVIDER = "├" + "─" * 58 + "┤"
+BOX_TOP = "╭" + "─" * BOX_WIDTH + "╮"
+BOX_BOTTOM = "╰" + "─" * BOX_WIDTH + "╯"
+BOX_DIVIDER = "├" + "─" * BOX_WIDTH + "┤"
 BOX_SIDE = "│"
-SUBAGENT_TOP = "┌" + "─" * 54 + "┐"
-SUBAGENT_BOTTOM = "└" + "─" * 54 + "┘"
+SUBAGENT_TOP = "┌" + "─" * SUBAGENT_WIDTH + "┐"
+SUBAGENT_BOTTOM = "└" + "─" * SUBAGENT_WIDTH + "┘"
 SUBAGENT_SIDE = "│"
 
 
 # Track subagent state for activity display
+# WARNING: This global state is NOT thread-safe. If using this module in concurrent
+# scenarios (e.g., multiple asyncio tasks processing different conversations simultaneously),
+# each task should call reset_activity_context() before starting and be aware that
+# interleaved operations may produce incorrect subagent tracking. For thread-safe usage,
+# consider passing context explicitly or using contextvars.
 _subagent_context: dict[str, Any] = {
     "active": False,
     "name": None,
@@ -217,7 +226,7 @@ def visualize_conversation(messages: list[Any]) -> None:
             pending_tools = []
         last_was_tool = False
 
-    for i, msg in enumerate(messages):
+    for _i, msg in enumerate(messages):
         msg_type = msg.__class__.__name__
 
         if msg_type == "SystemMessage":
@@ -367,7 +376,7 @@ def _image_to_base64(image_path: str) -> str:
         return base64.b64encode(img_file.read()).decode("utf-8")
 
 
-def print_html(content: Any, title: Optional[str] = None, is_image: bool = False) -> None:
+def print_html(content: Any, title: str | None = None, is_image: bool = False) -> None:
     """
     Pretty-print inside a styled card.
     - If is_image=True and content is a string: treat as image path/URL and render <img>.
