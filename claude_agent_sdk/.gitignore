@@ -19,6 +19,10 @@ wheels/
 .claude-code/
 /CLAUDE.md
 
+# Local settings (contains user-specific hooks, not for version control)
+**/.claude/settings.local.json
+**/settings.local.json
+
 # Development-only configuration (not for public distribution)
 # .claude/
 .vscode/

@@ -27,16 +27,110 @@ except ImportError:
     HTML = _HTML
 
 
+# Box-drawing characters for clean visual formatting
+BOX_TOP = "╭" + "─" * 58 + "╮"
+BOX_BOTTOM = "╰" + "─" * 58 + "╯"
+BOX_DIVIDER = "├" + "─" * 58 + "┤"
+BOX_SIDE = "│"
+SUBAGENT_TOP = "┌" + "─" * 54 + "┐"
+SUBAGENT_BOTTOM = "└" + "─" * 54 + "┘"
+SUBAGENT_SIDE = "│"
+
+
+# Track subagent state for activity display
+_subagent_context: dict[str, Any] = {
+    "active": False,
+    "name": None,
+    "depth": 0,
+}
+
+
 def print_activity(msg: Any) -> None:
+    """
+    Print activity with enhanced subagent visibility.
+
+    Shows:
+    - Main agent tool usage with 🤖
+    - Subagent invocations with 🚀 and subagent name
+    - Subagent tool usage with indented 📎
+    """
+    global _subagent_context
+
     if "Assistant" in msg.__class__.__name__:
         # Check if content exists and has elements
         if hasattr(msg, "content") and msg.content:
-            tool_name = msg.content[0].name if hasattr(msg.content[0], "name") else "Thinking..."
-            print(f"🤖 Using: {tool_name}()")
+            first_block = msg.content[0]
+            tool_name = first_block.name if hasattr(first_block, "name") else None
+
+            if tool_name == "Task":
+                # Extract subagent details from the Task tool input
+                if hasattr(first_block, "input") and first_block.input:
+                    subagent_type = first_block.input.get("subagent_type", "unknown")
+                    description = first_block.input.get("description", "")
+                    _subagent_context["active"] = True
+                    _subagent_context["name"] = subagent_type
+                    _subagent_context["depth"] += 1
+
+                    print(f"🚀 Delegating to subagent: {subagent_type}")
+                    if description:
+                        print(f"   └─ Task: {description}")
+                else:
+                    print("🚀 Delegating to subagent...")
+            elif tool_name:
+                # Check if we're inside a subagent context
+                if _subagent_context["active"]:
+                    indent = "   " * _subagent_context["depth"]
+                    print(f"{indent}📎 [{_subagent_context['name']}] Using: {tool_name}()")
+                else:
+                    print(f"🤖 Using: {tool_name}()")
+            else:
+                if _subagent_context["active"]:
+                    indent = "   " * _subagent_context["depth"]
+                    print(f"{indent}📎 [{_subagent_context['name']}] Thinking...")
+                else:
+                    print("🤖 Thinking...")
         else:
-            print("🤖 Thinking...")
+            if _subagent_context["active"]:
+                indent = "   " * _subagent_context["depth"]
+                print(f"{indent}📎 [{_subagent_context['name']}] Thinking...")
+            else:
+                print("🤖 Thinking...")
+
     elif "User" in msg.__class__.__name__:
-        print("✓ Tool completed")
+        # Check if this is a Task tool result (subagent completed)
+        if hasattr(msg, "content") and msg.content:
+            for result in msg.content if isinstance(msg.content, list) else [msg.content]:
+                if isinstance(result, dict) and result.get("type") == "tool_result":
+                    # Try to detect if this was a Task result
+                    content = result.get("content", "")
+                    if isinstance(content, str) and ("subagent" in content.lower() or
+                                                      _subagent_context["active"]):
+                        if _subagent_context["active"]:
+                            indent = "   " * _subagent_context["depth"]
+                            print(f"{indent}✅ Subagent [{_subagent_context['name']}] completed")
+                            _subagent_context["depth"] = max(0, _subagent_context["depth"] - 1)
+                            if _subagent_context["depth"] == 0:
+                                _subagent_context["active"] = False
+                                _subagent_context["name"] = None
+                        else:
+                            print("✓ Task completed")
+                        return
+
+        if _subagent_context["active"]:
+            indent = "   " * _subagent_context["depth"]
+            print(f"{indent}✓ Tool completed")
+        else:
+            print("✓ Tool completed")
+
+
+def reset_activity_context() -> None:
+    """Reset the subagent tracking context. Call before starting a new query."""
+    global _subagent_context
+    _subagent_context = {
+        "active": False,
+        "name": None,
+        "depth": 0,
+    }
 
 
 def print_final_result(messages: list[Any]) -> None:
@@ -66,79 +160,205 @@ def print_final_result(messages: list[Any]) -> None:
         print(f"⏱️  Duration: {result_msg.duration_ms / 1000:.2f}s")
 
 
+def _format_tool_info(tool_name: str, tool_input: dict) -> str:
+    """Format tool information with relevant parameters."""
+    info_parts = [tool_name]
+
+    if tool_input:
+        if tool_name == "WebSearch" and "query" in tool_input:
+            info_parts.append(f'→ "{tool_input["query"]}"')
+        elif tool_name == "Bash" and "command" in tool_input:
+            cmd = tool_input["command"]
+            info_parts.append(f"→ {cmd}")
+        elif tool_name == "Read" and "file_path" in tool_input:
+            path = tool_input["file_path"]
+            # Show just filename for readability
+            filename = path.split("/")[-1] if "/" in path else path
+            info_parts.append(f"→ {filename}")
+        elif tool_name == "Write" and "file_path" in tool_input:
+            path = tool_input["file_path"]
+            filename = path.split("/")[-1] if "/" in path else path
+            info_parts.append(f"→ {filename}")
+
+    return " ".join(info_parts)
+
+
 def visualize_conversation(messages: list[Any]) -> None:
-    """Create a visual representation of the entire agent conversation"""
-    print("\n" + "=" * 60)
-    print("🤖 AGENT CONVERSATION TIMELINE")
-    print("=" * 60 + "\n")
+    """
+    Create a clean, professional visualization of the agent conversation.
+
+    Features:
+    - Box-drawing characters for structure
+    - Grouped tool calls (no repetitive headers)
+    - Clear subagent delegation sections
+    - Minimal blank lines for compact output
+    """
+    # Header
+    print()
+    print(BOX_TOP)
+    print(f"{BOX_SIDE}  🤖 AGENT CONVERSATION TIMELINE" + " " * 25 + BOX_SIDE)
+    print(BOX_BOTTOM)
+    print()
+
+    # Track state
+    in_subagent = False
+    current_subagent = None
+    pending_tools: list[str] = []  # Collect consecutive tool calls
+    last_was_tool = False
+
+    def flush_pending_tools(indent: str = "") -> None:
+        """Print accumulated tool calls in a compact format."""
+        nonlocal pending_tools, last_was_tool
+        if pending_tools:
+            if len(pending_tools) == 1:
+                print(f"{indent}   🔧 {pending_tools[0]}")
+            else:
+                print(f"{indent}   🔧 Tools: {', '.join(pending_tools)}")
+            pending_tools = []
+        last_was_tool = False
 
     for i, msg in enumerate(messages):
         msg_type = msg.__class__.__name__
 
         if msg_type == "SystemMessage":
-            print("⚙️  System Initialized")
+            session_id = ""
             if hasattr(msg, "data") and "session_id" in msg.data:
-                print(f"   Session: {msg.data['session_id'][:8]}...")
-            print()
+                session_id = f" (Session: {msg.data['session_id'][:8]}...)"
+            print(f"⚙️  System Initialized{session_id}")
 
         elif msg_type == "AssistantMessage":
-            print("🤖 Assistant:")
-            if msg.content:
-                for block in msg.content:
-                    if hasattr(block, "text"):
-                        # Text response
-                        text = block.text[:500] + "..." if len(block.text) > 500 else block.text
-                        print(f"   💬 {text}")
-                    elif hasattr(block, "name"):
-                        # Tool use
-                        tool_name = block.name
-                        print(f"   🔧 Using tool: {tool_name}")
+            if not msg.content:
+                continue
 
-                        # Show key parameters for certain tools
-                        if hasattr(block, "input") and block.input:
-                            if tool_name == "WebSearch" and "query" in block.input:
-                                print(f'      Query: "{block.input["query"]}"')
-                            elif tool_name == "TodoWrite" and "todos" in block.input:
-                                todos = block.input["todos"]
-                                in_progress = [t for t in todos if t["status"] == "in_progress"]
-                                completed = [t for t in todos if t["status"] == "completed"]
-                                print(
-                                    f"      📋 {len(completed)} completed, {len(in_progress)} in progress"
-                                )
-            print()
+            for block in msg.content:
+                if hasattr(block, "text"):
+                    # Flush any pending tools before text
+                    flush_pending_tools("   " if in_subagent else "")
+
+                    text = block.text
+
+                    if in_subagent:
+                        print(f"\n   📎 [{current_subagent}] Response:")
+                        # Indent the text nicely
+                        for line in text.split('\n'):
+                            if line.strip():
+                                print(f"      {line.strip()}")
+                    else:
+                        print("\n🤖 Assistant:")
+                        # Indent the text nicely
+                        for line in text.split('\n'):
+                            if line.strip():
+                                print(f"   {line.strip()}")
+
+                elif hasattr(block, "name"):
+                    tool_name = block.name
+                    tool_input = block.input if hasattr(block, "input") else {}
+
+                    if tool_name == "Task":
+                        # Flush pending tools
+                        flush_pending_tools("   " if in_subagent else "")
+
+                        # Subagent delegation - create clear visual block
+                        subagent_type = tool_input.get("subagent_type", "unknown") if tool_input else "unknown"
+                        description = tool_input.get("description", "") if tool_input else ""
+                        prompt = tool_input.get("prompt", "") if tool_input else ""
+
+                        print()
+                        print(f"   {SUBAGENT_TOP}")
+                        print(f"   {SUBAGENT_SIDE}  🚀 DELEGATING TO: {subagent_type.upper():<36} {SUBAGENT_SIDE}")
+                        if description:
+                            print(f"   {SUBAGENT_SIDE}     📋 {description:<45} {SUBAGENT_SIDE}")
+                        print(f"   {SUBAGENT_BOTTOM}")
+
+                        if prompt:
+                            print(f"   📝 Prompt: {prompt}")
+
+                        print()
+                        in_subagent = True
+                        current_subagent = subagent_type
+
+                    else:
+                        # Regular tool - accumulate for grouped display
+                        tool_info = _format_tool_info(tool_name, tool_input)
+                        pending_tools.append(tool_info)
+                        last_was_tool = True
 
         elif msg_type == "UserMessage":
-            if msg.content and isinstance(msg.content, list):
-                for result in msg.content:
-                    if isinstance(result, dict) and result.get("type") == "tool_result":
-                        print("👤 Tool Result Received")
-                        tool_id = result.get("tool_use_id", "unknown")[:8]
-                        print(f"   ID: {tool_id}...")
+            if not msg.content or not isinstance(msg.content, list):
+                continue
 
-                        # Show result summary
-                        if "content" in result:
-                            content = result["content"]
-                            if isinstance(content, str):
-                                # Show more of the content
-                                summary = content[:500] + "..." if len(content) > 500 else content
-                                print(f"   📥 {summary}")
-            print()
+            for result in msg.content:
+                if not isinstance(result, dict) or result.get("type") != "tool_result":
+                    continue
+
+                content = result.get("content", "")
+
+                # Detect subagent completion (Task tool result with substantial content)
+                is_subagent_result = (
+                    in_subagent and
+                    isinstance(content, str) and
+                    len(content) > 200
+                )
+
+                if is_subagent_result:
+                    # Flush any pending tools
+                    flush_pending_tools("   ")
+
+                    # Show subagent completion
+                    print()
+                    print(f"   {SUBAGENT_TOP}")
+                    print(f"   {SUBAGENT_SIDE}  ✅ SUBAGENT [{current_subagent.upper()}] COMPLETE" + " " * (30 - len(current_subagent)) + SUBAGENT_SIDE)
+                    print(f"   {SUBAGENT_BOTTOM}")
+
+                    # Show result summary
+                    if content:
+                        lines = [line.strip() for line in content.split('\n') if line.strip()]
+                        if lines:
+                            print("   📊 Result:")
+                            for line in lines:
+                                print(f"      {line}")
+                    print()
+
+                    in_subagent = False
+                    current_subagent = None
+                else:
+                    # Regular tool result - just flush pending tools
+                    # (tool results don't need individual display)
+                    pass
+
+            # Flush tools after processing user message
+            flush_pending_tools("   " if in_subagent else "")
 
         elif msg_type == "ResultMessage":
-            print("✅ Conversation Complete")
-            if hasattr(msg, "num_turns"):
-                print(f"   Turns: {msg.num_turns}")
-            if hasattr(msg, "total_cost_usd"):
-                print(f"   Cost: ${msg.total_cost_usd:.2f}")
-            if hasattr(msg, "duration_ms"):
-                print(f"   Duration: {msg.duration_ms / 1000:.2f}s")
-            if hasattr(msg, "usage"):
-                usage = msg.usage
-                total_tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-                print(f"   Tokens: {total_tokens:,}")
-            print()
+            # Flush any remaining pending tools
+            flush_pending_tools("   " if in_subagent else "")
 
-    print("=" * 60 + "\n")
+            # Close subagent if still open
+            if in_subagent:
+                print()
+                print(f"   {SUBAGENT_TOP}")
+                print(f"   {SUBAGENT_SIDE}  ✅ SUBAGENT [{current_subagent.upper()}] COMPLETE" + " " * (30 - len(current_subagent)) + SUBAGENT_SIDE)
+                print(f"   {SUBAGENT_BOTTOM}")
+                in_subagent = False
+
+            # Final stats
+            print()
+            print("─" * 60)
+            stats_parts = []
+            if hasattr(msg, "num_turns"):
+                stats_parts.append(f"Turns: {msg.num_turns}")
+            if hasattr(msg, "total_cost_usd") and msg.total_cost_usd:
+                stats_parts.append(f"Cost: ${msg.total_cost_usd:.2f}")
+            if hasattr(msg, "duration_ms"):
+                stats_parts.append(f"Duration: {msg.duration_ms / 1000:.1f}s")
+            if hasattr(msg, "usage") and msg.usage:
+                total = msg.usage.get("input_tokens", 0) + msg.usage.get("output_tokens", 0)
+                stats_parts.append(f"Tokens: {total:,}")
+
+            print(f"✅ Complete │ {' │ '.join(stats_parts)}")
+            print("─" * 60)
+
+    print()
 
 
 def _image_to_base64(image_path: str) -> str:
@@ -173,7 +393,7 @@ def print_html(content: Any, title: Optional[str] = None, is_image: bool = False
                         break
                 if final_text:
                     break
-        
+
         if final_text:
             try:
                 import markdown
@@ -181,7 +401,7 @@ def print_html(content: Any, title: Optional[str] = None, is_image: bool = False
             except ImportError:
                 rendered = f"<div style='white-space: pre-wrap; font-family: inherit;'>{html.escape(final_text)}</div>"
         else:
-             rendered = f"<pre><code>{html.escape(pprint.pformat(content))}</code></pre>"
+            rendered = f"<pre><code>{html.escape(pprint.pformat(content))}</code></pre>"
     elif isinstance(content, (list, dict)):
         rendered = f"<pre><code>{html.escape(pprint.pformat(content))}</code></pre>"
     elif isinstance(content, str):

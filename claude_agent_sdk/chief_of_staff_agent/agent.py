@@ -83,7 +83,7 @@ async def send_query(
         settings = json.dumps({"outputStyle": output_style})
 
     options = ClaudeAgentOptions(
-        model="claude-sonnet-4-5",
+        model="claude-opus-4-5",
         allowed_tools=[
             "Task",  # enables subagent delegation
             "Read",
@@ -97,6 +97,13 @@ async def send_query(
         permission_mode=permission_mode,
         cwd=os.path.dirname(os.path.abspath(__file__)),
         settings=settings,
+        # IMPORTANT: setting_sources must include "project" to load filesystem settings:
+        # - Slash commands from .claude/commands/
+        # - CLAUDE.md project instructions
+        # - Subagent definitions from .claude/agents/
+        # - Hooks from .claude/settings.local.json
+        # Without this, the SDK operates in isolation mode with no filesystem settings loaded.
+        setting_sources=["project", "local"],
     )
 
     result = None
