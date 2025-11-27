@@ -97,18 +97,42 @@ def create_decision_matrix(
 
 **Why this matters:** Consistent code style improves readability and reduces cognitive load when learning from examples.
 
-### New Visualization Function
-**Modified:** `utils/agent_visualizer.py` (+148 lines)
+### Refactored Visualization Module
+**Modified:** `utils/agent_visualizer.py` (refactored to ~480 lines)
+**Added:** `utils/html_renderer.py` (NEW - 609 lines)
 
-**Addition:** `print_html()` function for rich output rendering:
-- Renders pandas DataFrames/Series as styled HTML tables
-- Displays images with base64 encoding
-- Formats markdown content with proper styling
-- Pretty-prints dictionaries and lists
-- Includes custom CSS for professional card-style display
-- Graceful fallback for non-notebook environments
+**Architecture Changes:**
+The visualization utilities were refactored into two modules with clear separation of concerns:
 
-**Why this matters:** Enhances the visual feedback loop during agent development, making it easier to debug and understand agent outputs.
+```
+utils/
+├── agent_visualizer.py    # PUBLIC API (5 exported functions)
+└── html_renderer.py       # HTML rendering implementation (internal)
+```
+
+**New Public API Functions:**
+
+| Function | Purpose |
+|----------|---------|
+| `print_activity(msg)` | Real-time activity tracking with subagent hierarchy |
+| `reset_activity_context()` | Reset between queries (handles nested subagent state) |
+| `visualize_conversation(messages)` | Auto-detects Jupyter vs terminal environment |
+| `print_final_result(messages, model)` | Final response with cost/token metrics |
+| `display_agent_response(messages)` | Styled HTML card rendering |
+
+**html_renderer.py Capabilities:**
+- Markdown rendering with tables, code blocks, and lists
+- Base64 image embedding for offline notebook viewing
+- Pandas DataFrame/Series support with styled tables
+- CSS gradient borders (blue → purple gradient)
+- Color-coded message blocks (system, assistant, tool, subagent, result)
+- Graceful fallbacks for missing optional dependencies
+
+**Why this matters:**
+1. **Separation of concerns**: Activity tracking logic is now separate from rendering logic
+2. **Environment detection**: Same code works in both Jupyter and terminal
+3. **Easier testing**: Clear API boundaries make unit testing possible
+4. **Extensibility**: New renderers can be added without touching the public API
 
 ---
 
@@ -118,23 +142,26 @@ def create_decision_matrix(
 **Modified:** `pyproject.toml`
 
 **Additions:**
+- `markdown>=3.4` - Markdown-to-HTML rendering for visualization
 - `numpy>=2.3.5` - Numerical computing support
 - `pandas>=2.3.3` - Data manipulation and analysis
-- `pandas-stubs` - Type hints for pandas
+- `pandas-stubs>=2.3.2` - Type hints for pandas
 - Version constraint updates for better compatibility
 
-**Why this matters:** Ensures consistent behavior across development environments and adds capabilities for data-heavy agent tasks.
+**Why this matters:** Ensures consistent behavior across development environments, enables rich markdown rendering in notebooks, and adds capabilities for data-heavy agent tasks.
 
 ---
 
 ## 📊 Summary of Changes
 
-| Category | Files Modified | Lines Added | Impact |
-|----------|---------------|-------------|--------|
+| Category | Files Modified | Lines Changed | Impact |
+|----------|---------------|---------------|--------|
 | **Documentation** | 3 new files | ~800 lines | High - Solves real problems, fills knowledge gaps |
 | **Learning Materials** | 2 notebooks + 2 new | +1,200 lines | High - Transforms code into comprehensive tutorials |
-| **Code Quality** | 4 Python files | +148 lines | Medium - Production best practices |
-| **Dependencies** | pyproject.toml | +9 lines | Low - Enables new capabilities |
+| **Visualization Module** | 2 Python files | +1,100 lines | High - Environment-aware rendering, public API |
+| **Agent Modules** | 2 agent.py files | +340 lines | Medium - Enhanced features, better docstrings |
+| **Code Quality** | 4 Python files | +200 lines | Medium - Type hints, linting, formatting |
+| **Dependencies** | pyproject.toml | +10 lines | Low - Enables new capabilities |
 
 ---
 
@@ -160,7 +187,9 @@ These additions maintain the tutorial's core philosophy:
 ### For Existing Users
 - Check **TROUBLESHOOTING.md** if working with images/PDFs
 - Review **CODEBASE_OVERVIEW.md** for architectural insights
-- Use new `print_html()` function for better output visualization
+- Use new visualization functions:
+  - `display_agent_response(messages)` for styled result cards
+  - `visualize_conversation(messages)` for full timeline (auto-detects Jupyter vs terminal)
 - Explore type hints in scripts for production implementation patterns
 
 ---
@@ -189,6 +218,6 @@ All additions follow these principles:
 
 ---
 
-**Last Updated:** 2025-11-23
+**Last Updated:** 2025-11-27
 **Compatible with:** `claude-agent-sdk` v0.0.20+
 **Python Version:** 3.11+

@@ -24,11 +24,13 @@ wheels/
 **/settings.local.json
 
 # Development-only configuration (not for public distribution)
-# .claude/
+.claude/
 .vscode/
+.github/
 
 # Development-only documentation (incomplete/work-in-progress)
 GEMINI.md
+permission-flow-diagram.md
 
 # Agent-generated output (development artifacts)
 chief_of_staff_agent/plans/
