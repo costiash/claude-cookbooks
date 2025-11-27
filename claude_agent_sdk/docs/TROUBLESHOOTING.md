@@ -31,7 +31,7 @@ from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
 
 async with ClaudeSDKClient(
     options=ClaudeAgentOptions(
-        model="claude-sonnet-4-5",
+        model="claude-opus-4-5",  # or claude-sonnet-4-5
         allowed_tools=["WebSearch", "Read"],
         max_buffer_size=10 * 1024 * 1024,  # 10MB for images
     )
@@ -56,7 +56,7 @@ from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
 
 async with ClaudeSDKClient(
     options=ClaudeAgentOptions(
-        model="claude-sonnet-4-5",
+        model="claude-opus-4-5",  # or claude-sonnet-4-5
         allowed_tools=["WebSearch", "Read"],
         max_buffer_size=10 * 1024 * 1024,
     )
@@ -150,7 +150,7 @@ async def analyze_chart(image_path: str) -> str:
     Returns the analysis text or None if failed.
     """
     options = ClaudeAgentOptions(
-        model="claude-sonnet-4-5",
+        model="claude-opus-4-5",  # or claude-sonnet-4-5
         allowed_tools=["Read", "WebSearch"],
         max_buffer_size=10 * 1024 * 1024,  # 10MB buffer
         stderr=lambda msg: print(f"[SDK Warning]: {msg}"),
@@ -200,5 +200,5 @@ print(f"Analysis: {result}")
 
 ---
 
-**Last Updated**: 2025-01-22
-**SDK Version**: claude-agent-sdk 0.0.x
+**Last Updated**: 2025-11-27
+**SDK Version**: claude-agent-sdk 0.0.20+

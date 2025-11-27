@@ -1,31 +1,43 @@
-import base64
-import html
-import pprint
+"""
+Visualization utilities for Claude Agent SDK conversations.
+
+This module is the PUBLIC API for all display functions in notebooks:
+- Real-time activity tracking (print_activity)
+- Conversation timelines (visualize_conversation)
+- Final result display (print_final_result)
+- Styled HTML card display (display_agent_response)
+"""
+
 from typing import Any
 
-# Initialize optional dependencies as Any to satisfy linters/mypy
-HTML: Any = None
-display: Any = None
-pd: Any = None
+from utils.html_renderer import display_agent_response, visualize_conversation_html
 
-try:
-    import pandas as pd
-except ImportError:
-    pass
+__all__ = [
+    "display_agent_response",
+    "print_activity",
+    "print_final_result",
+    "reset_activity_context",
+    "visualize_conversation",
+]
 
-try:
-    from IPython.display import HTML, display
-except ImportError:
 
-    def display(obj: Any) -> None:
-        pass
+def _is_jupyter() -> bool:
+    """
+    Detect if running in a Jupyter notebook environment.
 
-    class _HTML:
-        def __init__(self, data: Any):
-            self.data = data
+    Returns True for Jupyter notebook/lab, False for terminal/scripts.
+    """
+    try:
+        from IPython import get_ipython
 
-    HTML = _HTML
-
+        shell = get_ipython()
+        if shell is None:
+            return False
+        return shell.__class__.__name__ == "ZMQInteractiveShell"
+    except ImportError:
+        return False
+    except Exception:
+        return False
 
 # Box-drawing configuration constants
 BOX_WIDTH = 58  # Width for main conversation boxes
@@ -39,6 +51,35 @@ BOX_SIDE = "│"
 SUBAGENT_TOP = "┌" + "─" * SUBAGENT_WIDTH + "┐"
 SUBAGENT_BOTTOM = "└" + "─" * SUBAGENT_WIDTH + "┘"
 SUBAGENT_SIDE = "│"
+
+
+def extract_model_from_messages(messages: list[Any]) -> str | None:
+    """
+    Extract the model identifier from a list of messages.
+
+    Looks for model information in SystemMessage or ResultMessage.
+
+    Args:
+        messages: List of conversation messages
+
+    Returns:
+        Model identifier string or None if not found
+    """
+    for msg in messages:
+        msg_type = msg.__class__.__name__
+
+        # Check SystemMessage for model info
+        if msg_type == "SystemMessage":
+            if hasattr(msg, "data") and isinstance(msg.data, dict):
+                if "model" in msg.data:
+                    return msg.data["model"]
+
+        # Check ResultMessage for model info
+        if msg_type == "ResultMessage":
+            if hasattr(msg, "model"):
+                return msg.model
+
+    return None
 
 
 # Track subagent state for activity display
@@ -112,8 +153,9 @@ def print_activity(msg: Any) -> None:
                 if isinstance(result, dict) and result.get("type") == "tool_result":
                     # Try to detect if this was a Task result
                     content = result.get("content", "")
-                    if isinstance(content, str) and ("subagent" in content.lower() or
-                                                      _subagent_context["active"]):
+                    if isinstance(content, str) and (
+                        "subagent" in content.lower() or _subagent_context["active"]
+                    ):
                         if _subagent_context["active"]:
                             indent = "   " * _subagent_context["depth"]
                             print(f"{indent}✅ Subagent [{_subagent_context['name']}] completed")
@@ -142,13 +184,24 @@ def reset_activity_context() -> None:
     }
 
 
-def print_final_result(messages: list[Any]) -> None:
-    """Print the final agent result and cost information"""
+def print_final_result(messages: list[Any], model: str | None = None) -> None:
+    """
+    Print the final agent result and cost information.
+
+    Args:
+        messages: List of conversation messages
+        model: Optional model identifier for cost calculation.
+               If not provided, will attempt to extract from messages.
+    """
     if not messages:
         return
 
     # Get the result message (last message)
     result_msg = messages[-1]
+
+    # Try to extract model from messages if not provided
+    if model is None:
+        model = extract_model_from_messages(messages)
 
     # Find the last assistant message with actual content
     for msg in reversed(messages):
@@ -160,9 +213,20 @@ def print_final_result(messages: list[Any]) -> None:
                     break
             break
 
-    # Print cost if available
-    if hasattr(result_msg, "total_cost_usd"):
-        print(f"\n📊 Cost: ${result_msg.total_cost_usd:.2f}")
+    # Print cost (use reported cost from SDK - it's authoritative)
+    # Note: total_cost_usd is model-aware and calculated by the API
+    reported_cost = getattr(result_msg, "total_cost_usd", None)
+    num_turns = getattr(result_msg, "num_turns", 1)
+
+    if reported_cost is not None:
+        print(f"\n📊 Cost: ${reported_cost:.2f}")
+        if num_turns and num_turns > 1:
+            avg_cost = reported_cost / num_turns
+            print(f"   ({num_turns} turns, avg ${avg_cost:.4f}/turn)")
+
+    # Show model info
+    if model:
+        print(f"   Model: {model}")
 
     # Print duration if available
     if hasattr(result_msg, "duration_ms"):
@@ -192,41 +256,68 @@ def _format_tool_info(tool_name: str, tool_input: dict) -> str:
     return " ".join(info_parts)
 
 
+def _format_subagent_completion_line(subagent_name: str | None) -> str:
+    """
+    Format a subagent completion line with safe handling of None and long names.
+
+    Args:
+        subagent_name: Name of the subagent (may be None)
+
+    Returns:
+        Formatted completion line string
+    """
+    name = (subagent_name or "unknown").upper()
+    # Calculate padding, ensuring it's never negative
+    padding = max(0, 30 - len(name))
+    return f"   {SUBAGENT_SIDE}  ✅ SUBAGENT [{name}] COMPLETE" + " " * padding + SUBAGENT_SIDE
+
+
 def visualize_conversation(messages: list[Any]) -> None:
     """
     Create a clean, professional visualization of the agent conversation.
 
-    Features:
-    - Box-drawing characters for structure
-    - Grouped tool calls (no repetitive headers)
+    Auto-detects environment:
+    - Jupyter notebooks: Renders styled HTML timeline with color-coded message blocks
+    - Terminal/scripts: Falls back to box-drawing character visualization
+
+    Features (both modes):
+    - Grouped tool calls
     - Clear subagent delegation sections
-    - Minimal blank lines for compact output
+    - Model-aware cost breakdown
     """
+    # Auto-detect: use HTML in Jupyter, terminal fallback elsewhere
+    if _is_jupyter():
+        visualize_conversation_html(messages)
+        return
+
+    # Terminal fallback: box-drawing visualization
+    # Extract model info for cost calculations
+    model = extract_model_from_messages(messages)
+
     # Header
     print()
     print(BOX_TOP)
     print(f"{BOX_SIDE}  🤖 AGENT CONVERSATION TIMELINE" + " " * 25 + BOX_SIDE)
     print(BOX_BOTTOM)
     print()
+    print(f"📝 Model: {model or 'unknown'}")
 
     # Track state
     in_subagent = False
-    current_subagent = None
+    current_subagent: str | None = None
     pending_tools: list[str] = []  # Collect consecutive tool calls
-    last_was_tool = False
 
     def flush_pending_tools(indent: str = "") -> None:
         """Print accumulated tool calls in a compact format."""
-        nonlocal pending_tools, last_was_tool
+        nonlocal pending_tools
         if pending_tools:
             if len(pending_tools) == 1:
                 print(f"{indent}   🔧 {pending_tools[0]}")
             else:
                 print(f"{indent}   🔧 Tools: {', '.join(pending_tools)}")
             pending_tools = []
-        last_was_tool = False
 
-    for _i, msg in enumerate(messages):
+    for msg in messages:
         msg_type = msg.__class__.__name__
 
         if msg_type == "SystemMessage":
@@ -249,13 +340,13 @@ def visualize_conversation(messages: list[Any]) -> None:
                     if in_subagent:
                         print(f"\n   📎 [{current_subagent}] Response:")
                         # Indent the text nicely
-                        for line in text.split('\n'):
+                        for line in text.split("\n"):
                             if line.strip():
                                 print(f"      {line.strip()}")
                     else:
                         print("\n🤖 Assistant:")
                         # Indent the text nicely
-                        for line in text.split('\n'):
+                        for line in text.split("\n"):
                             if line.strip():
                                 print(f"   {line.strip()}")
 
@@ -268,13 +359,17 @@ def visualize_conversation(messages: list[Any]) -> None:
                         flush_pending_tools("   " if in_subagent else "")
 
                         # Subagent delegation - create clear visual block
-                        subagent_type = tool_input.get("subagent_type", "unknown") if tool_input else "unknown"
+                        subagent_type = (
+                            tool_input.get("subagent_type", "unknown") if tool_input else "unknown"
+                        )
                         description = tool_input.get("description", "") if tool_input else ""
                         prompt = tool_input.get("prompt", "") if tool_input else ""
 
                         print()
                         print(f"   {SUBAGENT_TOP}")
-                        print(f"   {SUBAGENT_SIDE}  🚀 DELEGATING TO: {subagent_type.upper():<36} {SUBAGENT_SIDE}")
+                        print(
+                            f"   {SUBAGENT_SIDE}  🚀 DELEGATING TO: {subagent_type.upper():<36} {SUBAGENT_SIDE}"
+                        )
                         if description:
                             print(f"   {SUBAGENT_SIDE}     📋 {description:<45} {SUBAGENT_SIDE}")
                         print(f"   {SUBAGENT_BOTTOM}")
@@ -290,7 +385,6 @@ def visualize_conversation(messages: list[Any]) -> None:
                         # Regular tool - accumulate for grouped display
                         tool_info = _format_tool_info(tool_name, tool_input)
                         pending_tools.append(tool_info)
-                        last_was_tool = True
 
         elif msg_type == "UserMessage":
             if not msg.content or not isinstance(msg.content, list):
@@ -303,11 +397,7 @@ def visualize_conversation(messages: list[Any]) -> None:
                 content = result.get("content", "")
 
                 # Detect subagent completion (Task tool result with substantial content)
-                is_subagent_result = (
-                    in_subagent and
-                    isinstance(content, str) and
-                    len(content) > 200
-                )
+                is_subagent_result = in_subagent and isinstance(content, str) and len(content) > 200
 
                 if is_subagent_result:
                     # Flush any pending tools
@@ -316,12 +406,12 @@ def visualize_conversation(messages: list[Any]) -> None:
                     # Show subagent completion
                     print()
                     print(f"   {SUBAGENT_TOP}")
-                    print(f"   {SUBAGENT_SIDE}  ✅ SUBAGENT [{current_subagent.upper()}] COMPLETE" + " " * (30 - len(current_subagent)) + SUBAGENT_SIDE)
+                    print(_format_subagent_completion_line(current_subagent))
                     print(f"   {SUBAGENT_BOTTOM}")
 
                     # Show result summary
                     if content:
-                        lines = [line.strip() for line in content.split('\n') if line.strip()]
+                        lines = [line.strip() for line in content.split("\n") if line.strip()]
                         if lines:
                             print("   📊 Result:")
                             for line in lines:
@@ -346,7 +436,7 @@ def visualize_conversation(messages: list[Any]) -> None:
             if in_subagent:
                 print()
                 print(f"   {SUBAGENT_TOP}")
-                print(f"   {SUBAGENT_SIDE}  ✅ SUBAGENT [{current_subagent.upper()}] COMPLETE" + " " * (30 - len(current_subagent)) + SUBAGENT_SIDE)
+                print(_format_subagent_completion_line(current_subagent))
                 print(f"   {SUBAGENT_BOTTOM}")
                 in_subagent = False
 
@@ -354,118 +444,33 @@ def visualize_conversation(messages: list[Any]) -> None:
             print()
             print("─" * 60)
             stats_parts = []
-            if hasattr(msg, "num_turns"):
-                stats_parts.append(f"Turns: {msg.num_turns}")
-            if hasattr(msg, "total_cost_usd") and msg.total_cost_usd:
-                stats_parts.append(f"Cost: ${msg.total_cost_usd:.2f}")
+            num_turns = getattr(msg, "num_turns", 1)
+            if num_turns:
+                stats_parts.append(f"Turns: {num_turns}")
+
+            # Extract token usage (note: this is cumulative across all turns)
+            input_tokens = 0
+            output_tokens = 0
+            if hasattr(msg, "usage") and msg.usage:
+                input_tokens = msg.usage.get("input_tokens", 0)
+                output_tokens = msg.usage.get("output_tokens", 0)
+                total_tokens = input_tokens + output_tokens
+                stats_parts.append(f"Tokens: {total_tokens:,}")
+
+            # Show cost (use reported cost from SDK - it's authoritative)
+            reported_cost = getattr(msg, "total_cost_usd", None)
+            if reported_cost:
+                stats_parts.append(f"Cost: ${reported_cost:.2f}")
+
             if hasattr(msg, "duration_ms"):
                 stats_parts.append(f"Duration: {msg.duration_ms / 1000:.1f}s")
-            if hasattr(msg, "usage") and msg.usage:
-                total = msg.usage.get("input_tokens", 0) + msg.usage.get("output_tokens", 0)
-                stats_parts.append(f"Tokens: {total:,}")
 
             print(f"✅ Complete │ {' │ '.join(stats_parts)}")
+
+            # Show model info
+            if model:
+                print(f"📊 Model: {model}")
+
             print("─" * 60)
 
     print()
-
-
-def _image_to_base64(image_path: str) -> str:
-    """Helper to convert image to base64 string"""
-    with open(image_path, "rb") as img_file:
-        return base64.b64encode(img_file.read()).decode("utf-8")
-
-
-def print_html(content: Any, title: str | None = None, is_image: bool = False) -> None:
-    """
-    Pretty-print inside a styled card.
-    - If is_image=True and content is a string: treat as image path/URL and render <img>.
-    - If content is a pandas DataFrame/Series: render as an HTML table.
-    - Otherwise (strings/otros): show as code/text in <pre><code>.
-    """
-    # Render content
-    rendered: str
-    if is_image and isinstance(content, str):
-        b64 = _image_to_base64(content)
-        rendered = f'<img src="data:image/png;base64,{b64}" alt="Image" style="max-width:100%; height:auto; border-radius:8px;">'
-    elif pd is not None and isinstance(content, pd.DataFrame):
-        rendered = content.to_html(classes="pretty-table", index=False, border=0, escape=False)
-    elif pd is not None and isinstance(content, pd.Series):
-        rendered = content.to_frame().to_html(classes="pretty-table", border=0, escape=False)
-    elif isinstance(content, list) and content and hasattr(content[-1], "__class__") and "Message" in content[-1].__class__.__name__:
-        final_text = None
-        for msg in reversed(content):
-            if "Assistant" in msg.__class__.__name__ and hasattr(msg, "content") and msg.content:
-                for block in msg.content:
-                    if hasattr(block, "text"):
-                        final_text = block.text
-                        break
-                if final_text:
-                    break
-
-        if final_text:
-            try:
-                import markdown
-                rendered = markdown.markdown(final_text)
-            except ImportError:
-                rendered = f"<div style='white-space: pre-wrap; font-family: inherit;'>{html.escape(final_text)}</div>"
-        else:
-            rendered = f"<pre><code>{html.escape(pprint.pformat(content))}</code></pre>"
-    elif isinstance(content, (list, dict)):
-        rendered = f"<pre><code>{html.escape(pprint.pformat(content))}</code></pre>"
-    elif isinstance(content, str):
-        rendered = f"<pre><code>{html.escape(content)}</code></pre>"
-    else:
-        rendered = f"<pre><code>{html.escape(str(content))}</code></pre>"
-
-    css = """
-    <style>
-    .pretty-card{
-      font-family: ui-sans-serif, system-ui;
-      border: 2px solid transparent;
-      border-radius: 14px;
-      padding: 14px 16px;
-      margin: 10px 0;
-      background: linear-gradient(#fff, #fff) padding-box,
-                  linear-gradient(135deg, #3b82f6, #9333ea) border-box;
-      color: #111;
-      box-shadow: 0 4px 12px rgba(0,0,0,.08);
-    }
-    .pretty-title{
-      font-weight:700;
-      margin-bottom:8px;
-      font-size:14px;
-      color:#111;
-    }
-    /* 🔒 Only affects INSIDE the card */
-    .pretty-card pre,
-    .pretty-card code {
-      background: #f3f4f6;
-      color: #111;
-      padding: 8px;
-      border-radius: 8px;
-      display: block;
-      overflow-x: auto;
-      font-size: 13px;
-      white-space: pre-wrap;
-    }
-    .pretty-card img { max-width: 100%; height: auto; border-radius: 8px; }
-    .pretty-card table.pretty-table {
-      border-collapse: collapse;
-      width: 100%;
-      font-size: 13px;
-      color: #111;
-    }
-    .pretty-card table.pretty-table th,
-    .pretty-card table.pretty-table td {
-      border: 1px solid #e5e7eb;
-      padding: 6px 8px;
-      text-align: left;
-    }
-    .pretty-card table.pretty-table th { background: #f9fafb; font-weight: 600; }
-    </style>
-    """
-
-    title_html = f'<div class="pretty-title">{title}</div>' if title else ""
-    card = f'<div class="pretty-card">{title_html}{rendered}</div>'
-    display(HTML(css + card))
