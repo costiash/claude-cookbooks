@@ -24,11 +24,6 @@ Addresses a critical real-world issue with the Claude Agent SDK:
 
 **Why this matters:** This issue blocks users when working with images/PDFs but wasn't documented. The guide provides production-ready solutions that can save hours of debugging.
 
-### GEMINI.md
-Documentation for using Google's Gemini as an alternative model provider.
-
-**Why this matters:** Provides flexibility for users who want to experiment with different model providers.
-
 ---
 
 ## 🎓 Enhanced Learning Materials
