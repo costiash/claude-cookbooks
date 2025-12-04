@@ -13,21 +13,17 @@ Key design decisions:
 
 import asyncio
 import os
-import sys
 from collections.abc import Callable
 from typing import Any
 
 from dotenv import load_dotenv
-
-from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, McpServerConfig
-
-# Add parent directory to path for utils imports when running as module
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.agent_visualizer import (  # noqa: E402
+from utils.agent_visualizer import (
     display_agent_response,
     print_activity,
     reset_activity_context,
 )
+
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient, McpServerConfig
 
 load_dotenv()
 

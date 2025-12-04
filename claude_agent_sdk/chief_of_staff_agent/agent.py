@@ -15,7 +15,7 @@ from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 load_dotenv()
 
 
-def get_activity_text(msg) -> str | None:
+def get_activity_text(msg: Any) -> str | None:
     """Extract activity text from a message"""
     try:
         if "Assistant" in msg.__class__.__name__:
@@ -31,7 +31,7 @@ def get_activity_text(msg) -> str | None:
     return None
 
 
-def print_activity(msg) -> None:
+def print_activity(msg: Any) -> None:
     """Print activity to console"""
     activity = get_activity_text(msg)
     if activity:

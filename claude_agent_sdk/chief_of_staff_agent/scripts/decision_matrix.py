@@ -38,16 +38,19 @@ def create_decision_matrix(
 ) -> DecisionMatrix:
     """Create a weighted decision matrix for strategic choices"""
 
+    # Initialize analysis separately with explicit type for proper type checking
+    initial_analysis: Analysis = {
+        "clear_winner": False,
+        "margin": 0.0,
+        "recommendation": "",
+        "key_differentiators": [],
+        "risks": [],
+    }
+
     results: DecisionMatrix = {
         "options": [],
         "winner": None,
-        "analysis": {  # type: ignore
-            "clear_winner": False,
-            "margin": 0.0,
-            "recommendation": "",
-            "key_differentiators": [],
-            "risks": [],
-        },
+        "analysis": initial_analysis,
     }
 
     for option in options:
@@ -152,7 +155,7 @@ def generate_analysis(options: list[OptionScore]) -> Analysis:
     return analysis
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Strategic decision matrix tool")
     parser.add_argument("--scenario", type=str, help="Predefined scenario")
     parser.add_argument("--input", type=str, help="JSON file with options and criteria")

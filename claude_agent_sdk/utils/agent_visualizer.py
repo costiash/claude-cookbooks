@@ -6,6 +6,26 @@ This module is the PUBLIC API for all display functions in notebooks:
 - Conversation timelines (visualize_conversation)
 - Final result display (print_final_result)
 - Styled HTML card display (display_agent_response)
+
+Example usage::
+
+    from utils.agent_visualizer import (
+        print_activity,
+        reset_activity_context,
+        visualize_conversation,
+        display_agent_response,
+    )
+
+    # Track activity during agent execution
+    reset_activity_context()
+    messages = []
+    async for msg in agent.receive_response():
+        print_activity(msg)
+        messages.append(msg)
+
+    # Display results (auto-detects Jupyter vs terminal)
+    visualize_conversation(messages)
+    display_agent_response(messages)
 """
 
 from typing import Any
@@ -33,11 +53,12 @@ def _is_jupyter() -> bool:
         shell = get_ipython()
         if shell is None:
             return False
-        return shell.__class__.__name__ == "ZMQInteractiveShell"
+        return bool(shell.__class__.__name__ == "ZMQInteractiveShell")
     except ImportError:
         return False
     except Exception:
         return False
+
 
 # Box-drawing configuration constants
 BOX_WIDTH = 58  # Width for main conversation boxes
@@ -72,12 +93,12 @@ def extract_model_from_messages(messages: list[Any]) -> str | None:
         if msg_type == "SystemMessage":
             if hasattr(msg, "data") and isinstance(msg.data, dict):
                 if "model" in msg.data:
-                    return msg.data["model"]
+                    return str(msg.data["model"])
 
         # Check ResultMessage for model info
         if msg_type == "ResultMessage":
             if hasattr(msg, "model"):
-                return msg.model
+                return str(msg.model)
 
     return None
 
@@ -103,6 +124,15 @@ def print_activity(msg: Any) -> None:
     - Main agent tool usage with 🤖
     - Subagent invocations with 🚀 and subagent name
     - Subagent tool usage with indented 📎
+
+    Example::
+
+        async for msg in agent.receive_response():
+            print_activity(msg)  # Prints: 🤖 Using: WebSearch()
+            messages.append(msg)
+
+    Args:
+        msg: A message object from the Claude Agent SDK response stream
     """
     global _subagent_context
 
@@ -175,7 +205,19 @@ def print_activity(msg: Any) -> None:
 
 
 def reset_activity_context() -> None:
-    """Reset the subagent tracking context. Call before starting a new query."""
+    """
+    Reset the subagent tracking context.
+
+    Call before starting a new query to ensure clean state for subagent tracking.
+
+    Example::
+
+        # Before each new query
+        reset_activity_context()
+        await agent.query("New research question")
+        async for msg in agent.receive_response():
+            print_activity(msg)
+    """
     global _subagent_context
     _subagent_context = {
         "active": False,
@@ -284,6 +326,18 @@ def visualize_conversation(messages: list[Any]) -> None:
     - Grouped tool calls
     - Clear subagent delegation sections
     - Model-aware cost breakdown
+
+    Example::
+
+        messages = []
+        async for msg in agent.receive_response():
+            messages.append(msg)
+
+        # Renders HTML in Jupyter, box-drawing in terminal
+        visualize_conversation(messages)
+
+    Args:
+        messages: List of message objects from the agent response
     """
     # Auto-detect: use HTML in Jupyter, terminal fallback elsewhere
     if _is_jupyter():

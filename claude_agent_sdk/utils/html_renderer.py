@@ -204,7 +204,8 @@ def _render_dataframe(df: Any) -> str:
     Returns:
         HTML table string
     """
-    return df.to_html(classes="pretty-table", index=False, border=0, escape=False)
+    result: str = df.to_html(classes="pretty-table", index=False, border=0, escape=True)
+    return result
 
 
 def _render_series(series: Any) -> str:
@@ -217,7 +218,8 @@ def _render_series(series: Any) -> str:
     Returns:
         HTML table string
     """
-    return series.to_frame().to_html(classes="pretty-table", border=0, escape=False)
+    result: str = series.to_frame().to_html(classes="pretty-table", border=0, escape=True)
+    return result
 
 
 def _render_message_list(messages: list[Any]) -> str:
@@ -265,10 +267,11 @@ def _render_markdown_text(text: str) -> str:
         HTML string
     """
     if markdown is not None:
-        return markdown.markdown(
+        result: str = markdown.markdown(
             text,
             extensions=["tables", "fenced_code", "nl2br", "sane_lists"],
         )
+        return result
     # Fallback: preserve whitespace and escape HTML
     return f"<pre style='white-space: pre-wrap;'>{html.escape(text)}</pre>"
 
@@ -474,10 +477,10 @@ def _extract_model_from_messages(messages: list[Any]) -> str | None:
         if msg_type == "SystemMessage":
             if hasattr(msg, "data") and isinstance(msg.data, dict):
                 if "model" in msg.data:
-                    return msg.data["model"]
+                    return str(msg.data["model"])
         if msg_type == "ResultMessage":
             if hasattr(msg, "model"):
-                return msg.model
+                return str(msg.model)
     return None
 
 
@@ -557,7 +560,9 @@ def visualize_conversation_html(messages: list[Any]) -> None:
 
                     if tool_name == "Task":
                         flush_tools()
-                        subagent_type = tool_input.get("subagent_type", "unknown") if tool_input else "unknown"
+                        subagent_type = (
+                            tool_input.get("subagent_type", "unknown") if tool_input else "unknown"
+                        )
                         description = tool_input.get("description", "") if tool_input else ""
                         blocks.append(
                             f'<div class="msg-block subagent">'
@@ -575,14 +580,22 @@ def visualize_conversation_html(messages: list[Any]) -> None:
             stats_html = ""
             stats = []
             if hasattr(msg, "num_turns") and msg.num_turns:
-                stats.append(f'<span class="stat-item"><span class="stat-label">Turns:</span> {msg.num_turns}</span>')
+                stats.append(
+                    f'<span class="stat-item"><span class="stat-label">Turns:</span> {msg.num_turns}</span>'
+                )
             if hasattr(msg, "usage") and msg.usage:
                 total = msg.usage.get("input_tokens", 0) + msg.usage.get("output_tokens", 0)
-                stats.append(f'<span class="stat-item"><span class="stat-label">Tokens:</span> {total:,}</span>')
+                stats.append(
+                    f'<span class="stat-item"><span class="stat-label">Tokens:</span> {total:,}</span>'
+                )
             if hasattr(msg, "total_cost_usd") and msg.total_cost_usd:
-                stats.append(f'<span class="stat-item"><span class="stat-label">Cost:</span> ${msg.total_cost_usd:.2f}</span>')
+                stats.append(
+                    f'<span class="stat-item"><span class="stat-label">Cost:</span> ${msg.total_cost_usd:.2f}</span>'
+                )
             if hasattr(msg, "duration_ms") and msg.duration_ms:
-                stats.append(f'<span class="stat-item"><span class="stat-label">Duration:</span> {msg.duration_ms / 1000:.1f}s</span>')
+                stats.append(
+                    f'<span class="stat-item"><span class="stat-label">Duration:</span> {msg.duration_ms / 1000:.1f}s</span>'
+                )
 
             if stats:
                 stats_html = f'<div class="stats-bar">{" ".join(stats)}</div>'
@@ -601,7 +614,7 @@ def visualize_conversation_html(messages: list[Any]) -> None:
     <div class="conversation-timeline">
         <div class="timeline-header">🤖 Agent Conversation Timeline{model_text}</div>
         <div class="timeline-body">
-            {''.join(blocks)}
+            {"".join(blocks)}
         </div>
     </div>
     """
